@@ -1,0 +1,15 @@
+[Unit]
+Description=Go Mail Manager Service
+After=network.target
+
+[Service]
+Type=simple
+Environment=GO_MAIL_MANAGER_APP_MOD=PROD
+Environment=GO_MAIL_MANAGER_DB_INFOS_DEV=/opt/mailmanager/config_dev.yaml
+Environment=GO_MAIL_MANAGER_DB_INFOS_PROD=/opt/mailmanager/config.yaml
+ExecStart=/opt/mailmanager/mailmanager
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

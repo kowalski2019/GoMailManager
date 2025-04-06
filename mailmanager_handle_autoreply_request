@@ -1,0 +1,144 @@
+#!/bin/bash
+
+# Check if all required arguments are provided
+if [ $# -ne 8 ]; then
+    echo "Usage: $0 name email subject message enabled start_date end_date deploy_mode"
+    exit 1
+fi
+
+name="$1"
+email="$2"
+subject="$3"
+message=`echo -e $4`
+enabled="$5"
+start_date="$6"
+end_date="$7"
+deploy_mode="$8"
+
+output_dir="/etc/dovecot/sieve"
+from="${name} <${email}>"
+mailhomedir="/home/vmail"
+domain=`echo $email | awk -F@ '{print $2}'`
+uname=`echo $email | awk -F@ '{print $1}'`
+
+maildir="${mailhomedir}/${domain}"
+user_maildir="${maildir}/${uname}"
+
+tmp_dir=`mktemp -d`	
+
+echo "User |$name|"
+echo "Email |$email|"
+echo "Process vacation file..."
+
+create_vacation_sieve_file() {
+  local tmp_output_file="${tmp_dir}/${uname}-vacation.sieve"
+  local output_file="${output_dir}/${uname}-vacation.sieve"
+  cat << EOF > "${tmp_output_file}"
+require ["vacation", "fileinto", "envelope"];
+
+# Avoid sending replies to mailing lists and automated systems
+if header :matches ["X-Spam-Flag"] ["YES"] {
+  fileinto "Junk Email";
+  stop;
+}
+
+if allof (
+  # Don't reply to automated messages
+  not header :matches ["subject"] [
+	"*auto*reply*",
+        "*out*of*office*", 
+        "*away*from*office*",
+        "*FW:*",
+        "*Fwd:*", 
+        "*FWD:*",
+        "*Forwarded:*",
+        "*[Fwd:*",
+        "*[FWD:*"
+   ],
+  # Don't reply to mailing lists
+  not exists ["List-Id"],
+  not exists ["List-Unsubscribe"]
+)
+{
+  vacation
+    # Only send one response per sender every 3 days
+    :days 1
+    # Set your subject line
+    :subject "$subject"
+    # Set your from address
+    :from "$from"
+    :addresses ["$email", "iim_all@industryinmotion.de"]
+    # Your message
+    "$message";
+}
+EOF
+  # Only move if the output file doesn't exist or contents are different
+  if [ ! -f "${output_file}" ] || ! cmp -s "${tmp_output_file}" "${output_file}"; then
+    cp "${tmp_output_file}" "${output_file}"
+    chown vmail:dovecot "${output_file}"
+  fi
+}
+
+save_job_id() {
+    local job_id="$1"
+    local user_job_file="${user_maildir}/auto-replies.job"
+    echo "$job_id" >> "$user_job_file"
+    chown vmail:mail "$user_job_file"
+}
+
+remove_existing_jobs() {
+    local user_job_file="${user_maildir}/auto-replies.job"
+    local temp_file="${user_job_file}.tmp"
+    
+    # Check if job file exists
+    if [ -f "$user_job_file" ]; then
+        # Create empty temp file
+        > "$temp_file"
+        
+        # Read each job ID from the file
+        while IFS= read -r job_id; do
+            # Check if job still exists in atq
+            if atq | grep -q "^${job_id}"; then
+                echo "Removing existing job $job_id for user $uname"
+                atrm "$job_id"
+            fi
+        done < "$user_job_file"
+        
+        # Replace original file with empty temp file
+        mv "$temp_file" "$user_job_file"
+        chown vmail:mail "$user_job_file"
+    fi
+}
+
+
+create_vacation_sieve_file
+
+start_date_string="$start_date"
+end_date_string="$end_date"
+start_time=$(date -d "$start_date_string" "+%H:%M %Y-%m-%d")
+end_time=$(date -d "$end_date_string" "+%H:%M %Y-%m-%d")
+
+if [ "$enabled" = "true" ]; then
+    # Remove any existing scheduled jobs for this user
+    remove_existing_jobs
+    
+    echo "execute mailmanager_enable_autoreply $email $user_maildir true $deploy_mode at $start_time"
+    job_id=$(echo "mailmanager_enable_autoreply $email $user_maildir true $deploy_mode" | at $start_time 2>&1 | grep -o "job [0-9]\+" | awk '{print $2}')
+    echo "Job ID: $job_id"
+    save_job_id "$job_id"
+    
+    echo "execute mailmanager_enable_autoreply $email $user_maildir false $deploy_mode at $end_time"
+    job_id=$(echo "mailmanager_enable_autoreply $email $user_maildir false $deploy_mode" | at $end_time 2>&1 | grep -o "job [0-9]\+" | awk '{print $2}')
+    echo "Job ID: $job_id"
+    save_job_id "$job_id"
+else
+    # Remove any existing scheduled jobs for this user
+    remove_existing_jobs
+    
+    echo "execute mailmanager_enable_autoreply $email $user_maildir false $deploy_mode"
+    mailmanager_enable_autoreply "$email" "$user_maildir" "false" "$deploy_mode"
+fi
+
+rm -rf $tmp_dir
+
+

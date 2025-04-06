@@ -1,0 +1,162 @@
+#!/bin/bash
+
+# Check if all required arguments are provided
+if [ $# -ne 4 ]; then
+    echo "Usage: $0 username maildir enabled deploy_mode"
+    exit 1
+fi
+
+email="$1"
+user_maildir="$2"
+enabled="$3"
+deploy_mode="$4"
+
+domain=`echo $email | awk -F@ '{print $2}'`
+uname=`echo $email | awk -F@ '{print $1}'`
+
+
+update_database_entry() {
+    local table_name="$1"
+    local column_name="$2"
+    local new_value="$3"
+    local where_condition="$4"
+    
+    # Using environment variables for credentials
+    if [ -z "$PGHOST" ] || [ -z "$PGUSER" ] || [ -z "$PGPASSWORD" ] || [ -z "$PGDATABASE" ]; then
+        echo "Database configuration not set"
+        return 1
+    fi
+    
+    # Escape single quotes in new_value
+    new_value="${new_value//\'/\'\'}"
+    
+    psql -v ON_ERROR_STOP=1 \
+        -c "UPDATE ${table_name} SET ${column_name} = '${new_value}' WHERE ${where_condition};"
+    
+    if [ $? -eq 0 ]; then
+        echo "Database updated successfully"
+        return 0
+    else
+        echo "Error updating database"
+        return 1
+    fi
+}
+
+
+
+make_request() {
+    local base_url="$1"
+    local access_token="$2"
+    local refresh_token="$3"
+    
+    local response=$(curl -s -w "%{http_code}" -X POST "${base_url}/api/iim/users/mailmanager/aut-reply/callback" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${access_token}" \
+        -d "{\"user_email\": \"$email\"}")
+    local http_code=${response: -3}
+    local body=${response:0:${#response}-3}
+
+    if [ "$http_code" = "401" ] || [ "$http_code" = "403" ]; then
+        # Try to refresh token
+        local refresh_response=$(curl -s -X POST "${base_url}/api/iim/auth/refresh" \
+            -H "Content-Type: application/json" \
+            -d "{\"refreshToken\": \"$refresh_token\"}")
+        
+        access_token=$(echo "$refresh_response" | jq -r '.accessToken')
+        refresh_token=$(echo "$refresh_response" | jq -r '.refreshToken')
+
+        echo "access_token: $access_token"
+        echo "refresh_token: $refresh_token"
+
+        if [ -n "$access_token" ] && [ "$access_token" != "null" ]; then
+            # Update tokens file
+            sed -i "s/accessToken:\"\"/accessToken:\"$access_token\"/" "$token_file"
+            sed -i "s/refreshToken:\"\"/refreshToken:\"$refresh_token\"/" "$token_file"
+
+            # Retry the request with new token
+            response=$(curl -s -X POST "${base_url}/api/iim/users/mailmanager/aut-reply/callback" \
+                -H "Content-Type: application/json" \
+                -H "Authorization: Bearer ${access_token}" \
+                -d "{\"user_email\": \"$email\"}")
+            return 0
+        else
+            return 1
+        fi
+    elif [ "$http_code" = "200" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Check if maildir exists
+if [ ! -d "$user_maildir" ]; then
+    echo "Error: Maildir '$user_maildir' does not exist"
+    exit 1
+fi
+
+sieve_file="${user_maildir}/.dovecot.sieve"
+vacation_line="include :global \"${uname}-vacation\";"
+
+# Create file with default content if it doesn't exist
+if [ ! -f "$sieve_file" ]; then
+        cat << EOF > "$sieve_file"
+require ["include"];
+
+include :global "spam-handling";
+EOF
+fi
+
+if [ "$enabled" = "true" ]; then
+    # Add vacation line if not present at the end of file
+    grep -q "$vacation_line" "$sieve_file" || echo "$vacation_line" >> "$sieve_file"
+else
+    # Remove vacation line if present
+    sed -i "/$vacation_line/d" "$sieve_file"
+    
+    # Set the base URL based on deploy mode
+    base_url="https://backend.industryinmotion.de"
+    if [ "$deploy_mode" != "PROD" ]; then
+        base_url="https://iimdevbackend.isinteger.de"
+    fi
+
+    token_file="/opt/mailmanager/tokens"
+    user_accessdata_file="/opt/mailmanager/user_accessdata"
+    MAILMANAGER_USER=`grep "identifier" $user_accessdata_file | awk -F\" '{print $2}'`
+    MAILMANAGER_PASSWORD=`grep "password" $user_accessdata_file | awk -F\" '{print $2}'`
+
+    # Read existing tokens
+    access_token=$(grep "accessToken:" "$token_file" | cut -d'"' -f2)
+    refresh_token=$(grep "refreshToken:" "$token_file" | cut -d'"' -f2)
+
+    if [ -z "$access_token" ]; then
+        echo "No access token found, logging in..."
+        # Get new tokens by logging in
+        login_response=$(curl -s -X POST "${base_url}/api/iim/auth/login" \
+            -H "Content-Type: application/json" \
+            -d '{"identifier": "'"${MAILMANAGER_USER}"'", "password": "'"${MAILMANAGER_PASSWORD}"'"}')
+        
+        access_token=$(echo "$login_response" | jq -r '.accessToken')
+        refresh_token=$(echo "$login_response" | jq -r '.refreshToken')
+
+        echo "access_token: $access_token"
+        echo "refresh_token: $refresh_token"
+
+        if [ -n "$access_token" ] && [ "$access_token" != "null" ]; then
+            # Update tokens file
+            sed -i "s/accessToken:\"\"/accessToken:\"$access_token\"/" "$token_file"
+            sed -i "s/refreshToken:\"\"/refreshToken:\"$refresh_token\"/" "$token_file"
+        else
+            echo "Failed to obtain JWT token"
+            exit 1
+        fi
+    fi
+
+    # Make the request with existing or new token
+    if ! make_request "$base_url" "$access_token" "$refresh_token"; then
+        echo "Failed to make API request"
+        exit 1
+    fi
+fi
+
+chown vmail:mail "$sieve_file"

@@ -1,0 +1,33 @@
+database:
+  pgsql_host: "db.industryinmotion.de"
+  pgsql_port: "5432"
+  pgsql_user: "iim_remote_user"
+  pgsql_password: "sRfK6f3H1eUtdq"
+  pgsql_name: "iim_test"
+
+jwt:
+  secret: "db58dc2405d2b19a66536210166bf0e9cc6002e8ba6e0f4ad9eb24ff05cdc1ba99e6475eae8afb7d33ad09632645b4c9d5d32424bb9992ba6406442625941eb3"
+
+http:
+  port: 808
+
+auth:
+  key: "nbaki123"
+
+smtp:
+  host: "mail.nbaki.com"
+  port: 465
+  username: "noreply@nbaki.com"
+  password: "nbaki123"
+
+cron:
+  check_auto_replies_interval: "@every 1m"
+  check_emails_rules_interval: "@every 1m"
+
+log:
+  path: "/opt/mailmanager/logs"
+  path_lin: "/opt/mailmanager/logs"
+  path_win: "C:\\mailmanager\\logs"
+
+
+

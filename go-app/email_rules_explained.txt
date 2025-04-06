@@ -1,0 +1,63 @@
+is_from:
+    if address :is "from" "noreply@nbaki.com"
+
+subject_contains:
+    if header :contains :comparator "i;ascii-casemap" "subject" "business"
+
+body_contains:
+    if body :text :contains :comparator "i;ascii-casemap" ["Dummy", "Hola"]
+
+is_addressed_to:
+    if address :is "to" "noreply@nbaki.com"
+
+is_cc_d_to:
+    if address :is "cc" "noreply@nbaki.com"
+
+
+# Action
+copy:
+    fileinto :create "DummyDir";
+    keep;
+
+move:
+    fileinto :create "FromJohn";
+
+forward to:
+    redirect "manager@example.com";
+
+forward to and keep copy:
+    redirect "manager@example.com";
+    fileinto :create "DummyDir";
+
+forward to and keep copy:
+    redirect :copy "manager@example.com";
+
+delete:
+    discard;
+
+delete:
+    fileinto :create "Trash";
+
+
+require ["variables", "redirect", "editheader"];
+
+# Store the original subject
+if header :matches "Subject" "*" {
+  set "original_subject" "${1}";
+}
+
+# Create new subject with FWD prefix
+if string "${original_subject}" :matches "??*" {
+  # Subject already exists, add FWD prefix
+  set "new_subject" "FWD: ${original_subject}";
+} else {
+  # No subject exists
+  set "new_subject" "FWD: (No Subject)";
+}
+
+# Replace the subject with the new one
+deleteheader "Subject";
+addheader "Subject" "${new_subject}";
+
+# Redirect the modified message
+redirect "someone@example.com";

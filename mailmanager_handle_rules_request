@@ -1,0 +1,79 @@
+#!/bin/bash
+
+# Check if all required arguments are provided
+if [ $# -ne 8 ]; then
+    echo "Usage: $0 rule_id user_email name condition condition_value action action_value description"
+    exit 1
+fi
+
+rule_id="$1"
+user_email="$2"
+domain=`echo $user_email | awk -F@ '{print $2}'`
+uname=`echo $user_email | awk -F@ '{print $1}'`
+name="$3"
+condition="$4"
+condition_value="$5"
+action="$6"
+action_value="$7"
+description="$8"
+
+output_dir="/etc/dovecot/sieve"
+mailhomedir="/home/vmail"
+maildir="${mailhomedir}/${domain}"
+user_maildir="${maildir}/${uname}"
+
+echo "name: $name"
+echo "condition: $condition"
+echo "condition_value: $condition_value"
+echo "action: $action"
+echo "action_value: $action_value"
+echo "description: $description"
+echo "deploy_mode: $deploy_mode"
+
+# Declare an associative array
+declare -A rule_data
+
+rule_data["is from"]="address :is \"from\""
+rule_data["contains"]="body :text :contains :comparator \"i;ascii-casemap\""
+rule_data["subject contains"]="header :contains :comparator \"i;ascii-casemap\" \"subject\""
+rule_data["is addressed to"]="address :is \"to\""
+rule_data["is Cc'd to"]="address :is \"cc\""
+
+rule_data["Copy to Folder"]="fileinto :create \"$action_value\"; keep;"
+rule_data["Move to Folder"]="fileinto :create \"$action_value\";"
+rule_data["Forward to"]="redirect \"$action_value\";"
+rule_data["Forward to and keep"]="redirect :copy \"$action_value\";"
+rule_data["Delete"]="discard;"
+
+
+echo "rule_data: ${rule_data[@]}"
+
+echo -e "\n"
+
+rule_nb=`ls -1 $output_dir | grep -E "${uname}-rule-[0-9]+-[0-9]+.sieve" | wc -l`
+[ $rule_nb -lt 10 ] && rule_nb="0${rule_nb}"
+
+output_file="${output_dir}/${uname}-rule-${rule_nb}-${rule_id}.sieve"
+
+cat <<EOF > "$output_file"
+require ["fileinto", "mailbox", "body", "copy"];
+
+if ${rule_data[$condition]} "$condition_value"
+{
+   ${rule_data[$action]}
+}
+
+EOF
+
+rule_line="include :global \"${uname}-rule-${rule_nb}-${rule_id}\";"
+
+sieve_file="${user_maildir}/.dovecot.sieve"
+
+# Add rule line if not present
+grep -q "$rule_line" "$sieve_file" || echo "$rule_line" >> "$sieve_file"
+
+echo "$(cat $output_file)"
+
+# usage example:
+# ./mailmanager_handle_rules_request 1234567890 user@example.com "Test Rule" "is from" "test@example.com" "Copy to Folder" "Inbox" "Test rule description"
+

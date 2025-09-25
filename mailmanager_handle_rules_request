@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Check if all required arguments are provided
-if [ $# -ne 8 ]; then
+if [ $# -lt 7 ]; then
     echo "Usage: $0 rule_id user_email name condition condition_value action action_value description"
     exit 1
 fi
@@ -23,6 +23,7 @@ maildir="${mailhomedir}/${domain}"
 user_maildir="${maildir}/${uname}"
 
 echo "name: $name"
+echo "user_email: $user_email"
 echo "condition: $condition"
 echo "condition_value: $condition_value"
 echo "action: $action"
@@ -33,17 +34,17 @@ echo "deploy_mode: $deploy_mode"
 # Declare an associative array
 declare -A rule_data
 
-rule_data["is from"]="address :is \"from\""
+rule_data["is_from"]="address :is \"from\""
 rule_data["contains"]="body :text :contains :comparator \"i;ascii-casemap\""
-rule_data["subject contains"]="header :contains :comparator \"i;ascii-casemap\" \"subject\""
-rule_data["is addressed to"]="address :is \"to\""
-rule_data["is Cc'd to"]="address :is \"cc\""
+rule_data["subject"]="header :contains :comparator \"i;ascii-casemap\" \"subject\""
+rule_data["is_addressed_to"]="address :is \"to\""
+rule_data["is_cc_to"]="address :is \"cc\""
 
-rule_data["Copy to Folder"]="fileinto :create \"$action_value\"; keep;"
-rule_data["Move to Folder"]="fileinto :create \"$action_value\";"
-rule_data["Forward to"]="redirect \"$action_value\";"
-rule_data["Forward to and keep"]="redirect :copy \"$action_value\";"
-rule_data["Delete"]="discard;"
+rule_data["copy"]="fileinto :create \"$action_value\"; keep;"
+rule_data["move"]="fileinto :create \"$action_value\";"
+rule_data["forward"]="redirect \"$action_value\";"
+rule_data["forward_and_keep"]="redirect :copy \"$action_value\";"
+rule_data["delete"]="discard;"
 
 
 echo "rule_data: ${rule_data[@]}"

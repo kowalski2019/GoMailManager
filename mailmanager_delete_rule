@@ -19,15 +19,29 @@ user_maildir="${maildir}/${uname}"
 
 sieve_file="${user_maildir}/.dovecot.sieve"
 
-rule_filename=`find ${output_dir} -name "${uname}-rule-*-${rule_id}.sieve" | sed 's/^\.\///'`
-rule_file_without_extension=`echo $rule_filename | sed 's/\.sieve//'` 
+# Find the rule file and handle the case when no file is found
+rule_filename=$(find ${output_dir} -name "${uname}-rule-*-${rule_id}.sieve")
+rule_filename=$(basename $rule_filename)
+
+# Check if rule_filename is empty
+if [ -z "$rule_filename" ]; then
+    echo "Rule file not found"
+    exit 1
+fi
+
+rule_file_without_extension=$(echo "$rule_filename" | sed 's/\.sieve//')
 
 rule_line="include :global \"${rule_file_without_extension}\";"
 
+echo "rule_line to remove: $rule_line"
 # Remove rule line if present
 sed -i "/$rule_line/d" "$sieve_file"
 
-[ -f "${output_dir}/${rule_filename}" ] && rm -rf "${output_dir}/${rule_filename}" || echo "Rule file not found"
+# Remove the rule file
+rm -f "${output_dir}/${rule_filename}"
+
+echo "Rule file removed: ${output_dir}/${rule_filename}"
+echo "done"
 
 
 # usage example:

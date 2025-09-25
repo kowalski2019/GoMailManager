@@ -49,14 +49,14 @@ make_request() {
     local access_token="$2"
     local refresh_token="$3"
     
-    local response=$(curl -s -w "%{http_code}" -X POST "${base_url}/api/iim/users/mailmanager/aut-reply/callback" \
+    local response=$(curl -s -w "%{http_code}" -X POST "${base_url}/api/iim/users/mailmanager/auto-reply/callback" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${access_token}" \
         -d "{\"user_email\": \"$email\"}")
     local http_code=${response: -3}
     local body=${response:0:${#response}-3}
 
-    if [ "$http_code" = "401" ] || [ "$http_code" = "403" ]; then
+    if [ "$http_code" = "400" ] || [ "$http_code" = "401" ] || [ "$http_code" = "403" ]; then
         # Try to refresh token
         local refresh_response=$(curl -s -X POST "${base_url}/api/iim/auth/refresh" \
             -H "Content-Type: application/json" \
@@ -69,12 +69,12 @@ make_request() {
         echo "refresh_token: $refresh_token"
 
         if [ -n "$access_token" ] && [ "$access_token" != "null" ]; then
-            # Update tokens file
-            sed -i "s/accessToken:\"\"/accessToken:\"$access_token\"/" "$token_file"
-            sed -i "s/refreshToken:\"\"/refreshToken:\"$refresh_token\"/" "$token_file"
+            # Update tokens file with proper escaping and handling of existing tokens
+            sed -i "s|accessToken:\".*\"|accessToken:\"${access_token}\"|" "$token_file"
+            sed -i "s|refreshToken:\".*\"|refreshToken:\"${refresh_token}\"|" "$token_file"
 
             # Retry the request with new token
-            response=$(curl -s -X POST "${base_url}/api/iim/users/mailmanager/aut-reply/callback" \
+            response=$(curl -s -X POST "${base_url}/api/iim/users/mailmanager/auto-reply/callback" \
                 -H "Content-Type: application/json" \
                 -H "Authorization: Bearer ${access_token}" \
                 -d "{\"user_email\": \"$email\"}")
@@ -116,11 +116,13 @@ else
     
     # Set the base URL based on deploy mode
     base_url="https://backend.industryinmotion.de"
+    config_file_tail=""
     if [ "$deploy_mode" != "PROD" ]; then
         base_url="https://iimdevbackend.isinteger.de"
+        config_file_tail="_dev"
     fi
 
-    token_file="/opt/mailmanager/tokens"
+    token_file="/opt/mailmanager/tokens${config_file_tail}"
     user_accessdata_file="/opt/mailmanager/user_accessdata"
     MAILMANAGER_USER=`grep "identifier" $user_accessdata_file | awk -F\" '{print $2}'`
     MAILMANAGER_PASSWORD=`grep "password" $user_accessdata_file | awk -F\" '{print $2}'`
@@ -143,9 +145,9 @@ else
         echo "refresh_token: $refresh_token"
 
         if [ -n "$access_token" ] && [ "$access_token" != "null" ]; then
-            # Update tokens file
-            sed -i "s/accessToken:\"\"/accessToken:\"$access_token\"/" "$token_file"
-            sed -i "s/refreshToken:\"\"/refreshToken:\"$refresh_token\"/" "$token_file"
+            # Update tokens file with proper escaping and handling of existing tokens
+            sed -i "s|accessToken:\".*\"|accessToken:\"${access_token}\"|" "$token_file"
+            sed -i "s|refreshToken:\".*\"|refreshToken:\"${refresh_token}\"|" "$token_file"
         else
             echo "Failed to obtain JWT token"
             exit 1
